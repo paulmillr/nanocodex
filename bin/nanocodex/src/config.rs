@@ -6,11 +6,6 @@ use std::{
 
 use clap::{ArgAction, Args, builder::NonEmptyStringValueParser};
 use eyre::{Result, WrapErr, eyre};
-#[cfg(any(
-    all(target_os = "linux", not(target_env = "musl")),
-    all(target_os = "macos", target_arch = "aarch64")
-))]
-use nanocodex::NanocodexBuilder;
 use nanocodex::{
     AgentEvents, DurableAgentExt as _, Model, Nanocodex, OpenAi, ReasoningMode, Thinking, Tools,
     agent::{
@@ -26,8 +21,6 @@ use nanocodex::{
 use nanocodex_durability::{DurableSession as PortableDurableSession, SqliteStore};
 
 use crate::browser::{BrowserArgs, ConfiguredBrowser};
-use crate::login::load_managed_mcp_credential;
-use crate::managed_memory::{ConfiguredManagedMemory, MEMORY_INSTRUCTIONS};
 use crate::mcp::{ConfiguredMcp, McpArgs};
 use crate::mpp::{MppAdapter, MppArgs};
 use crate::subagents::{self, ChildAgents, DEFAULT_MAX_SUBAGENTS, SubagentToolSet};
@@ -93,21 +86,6 @@ pub(crate) enum SharedAuth {
     ApiKey(Arc<str>),
     AccessToken(Arc<str>),
     AuthFile(PathBuf),
-}
-
-/// The deliberately small standard-agent configuration accepted by eval
-/// commands.
-#[cfg(any(
-    all(target_os = "linux", not(target_env = "musl")),
-    all(target_os = "macos", target_arch = "aarch64")
-))]
-#[derive(Args)]
-pub(crate) struct EvalAgentArgs {
-    #[command(flatten)]
-    auth: AuthArgs,
-
-    #[command(flatten)]
-    model_policy: ModelArgs,
 }
 
 #[derive(Args)]
@@ -197,15 +175,6 @@ pub(crate) struct AgentArgs {
     )]
     rollouts: bool,
 
-    /// Enable hosted Nanocodex session search and durable organization memory.
-    #[arg(
-        long,
-        env = "NANOCODEX_MEMORY",
-        default_value_t = false,
-        action = ArgAction::Set
-    )]
-    memory: bool,
-
     /// Responses API WebSocket endpoint.
     #[arg(long, env = "OPENAI_RESPONSES_WEBSOCKET_URL")]
     websocket_url: Option<String>,
@@ -245,16 +214,6 @@ pub(crate) struct AgentArgs {
 }
 
 impl AgentArgs {
-    pub(crate) fn restrict_to_host_control(&mut self, instructions: impl Into<String>) {
-        self.browser.disable();
-        self.mcp.disable();
-        self.model_policy.web_search = Some(false);
-        self.image_generation = false;
-        self.subagents = false;
-        self.rollouts = false;
-        self.instructions = Some(instructions.into());
-    }
-
     pub(crate) fn cwd(&self) -> &Path {
         self.cwd.as_deref().unwrap_or_else(|| Path::new("."))
     }
@@ -351,19 +310,7 @@ impl AgentArgs {
         }
         let codex_home = default_codex_home()?;
         let responses_transport = self.responses_transport();
-        let mut session = prepare_session_build(self.cwd, self.rollouts, &codex_home, durable)?;
-        if self.memory && session.session_id.is_none() {
-            session.session_id = Some(SessionId::new());
-        }
-        let managed_memory = if self.memory {
-            let _timing = crate::startup_timing::Stage::new("managed_memory");
-            let root_session_id = session.session_id.ok_or_else(|| {
-                eyre!("memory-enabled sessions require an explicit session identity")
-            })?;
-            Some(ConfiguredManagedMemory::connect(&codex_home, root_session_id).await?)
-        } else {
-            None
-        };
+        let session = prepare_session_build(self.cwd, self.rollouts, &codex_home, durable)?;
         // Browser interaction is supplied by CUA, including for the direct CLI.
         let configured_browser = None;
         let mpp_enabled = self.mpp.is_enabled();
@@ -382,6 +329,7 @@ impl AgentArgs {
             None => connected_account_default_model(auth.mode()),
         };
         let direct_websocket_url = direct_websocket_url(self.websocket_url, auth.mode());
+        check_endpoint("Responses WebSocket URL", &direct_websocket_url)?;
         let mpp_adapter = self.mpp.start().await?;
         let mut openai = OpenAi::builder(auth)
             .transport(responses_transport)
@@ -401,6 +349,7 @@ impl AgentArgs {
             mpp_adapter.as_ref().map(MppAdapter::api_base_url),
         );
         if let Some(api_base_url) = api_base_url {
+            check_endpoint("API base URL", &api_base_url)?;
             openai = openai.api_base_url(api_base_url);
         }
         if matches!(responses_transport, ResponsesTransport::Https)
@@ -425,15 +374,7 @@ impl AgentArgs {
         }
         .web_search(web_search)
         .image_generation(self.image_generation);
-        let managed_mcp = if self.mcp.loads_managed() {
-            let _timing = crate::startup_timing::Stage::new("managed_mcp_credentials");
-            load_managed_mcp_credential(&codex_home).await?
-        } else {
-            None
-        };
-        let mcp = self
-            .mcp
-            .build(&codex_home, mpp_adapter.as_ref(), managed_mcp.as_ref())?;
+        let mcp = self.mcp.build(&codex_home, mpp_adapter.as_ref())?;
         let mcp_handle = mcp.as_ref().map(|mcp| mcp.handle.clone());
         if let Some(ConfiguredMcp { provider, .. }) = mcp {
             tools = tools.provider(provider);
@@ -460,9 +401,6 @@ impl AgentArgs {
             for tool in computer.tools() {
                 tools = tools.add(tool);
             }
-        }
-        if let Some(managed_memory) = &managed_memory {
-            tools = managed_memory.install(tools);
         }
         let tools = tools.build()?;
         let generic_subagents = self.subagents;
@@ -500,11 +438,8 @@ impl AgentArgs {
         } else {
             builder.tools(tools)
         };
-        let additional_instructions = session_instructions(
-            self.instructions.as_deref(),
-            generic_subagents,
-            managed_memory.is_some(),
-        );
+        let additional_instructions =
+            session_instructions(self.instructions.as_deref(), generic_subagents);
         let builder = if let Some(instructions) = self.instructions {
             builder.instructions(instructions)
         } else {
@@ -595,18 +530,11 @@ const SUBAGENT_INSTRUCTIONS: &str = concat!(
     "verification."
 );
 
-fn session_instructions(
-    custom: Option<&str>,
-    subagents_enabled: bool,
-    memory_enabled: bool,
-) -> Option<String> {
+fn session_instructions(custom: Option<&str>, subagents_enabled: bool) -> Option<String> {
     let custom = custom.unwrap_or_default();
     let mut instructions = Vec::new();
     if subagents_enabled && !custom.contains(SUBAGENT_INSTRUCTIONS) {
         instructions.push(SUBAGENT_INSTRUCTIONS);
-    }
-    if memory_enabled && !custom.contains(MEMORY_INSTRUCTIONS) {
-        instructions.push(MEMORY_INSTRUCTIONS);
     }
     (!instructions.is_empty()).then(|| instructions.join("\n\n"))
 }
@@ -622,31 +550,6 @@ impl AuthArgs {
     }
 }
 
-#[cfg(any(
-    all(target_os = "linux", not(target_env = "musl")),
-    all(target_os = "macos", target_arch = "aarch64")
-))]
-impl EvalAgentArgs {
-    pub(crate) fn shared_builder(
-        self,
-        model: Model,
-        thinking: Thinking,
-        web_search: bool,
-    ) -> Result<(NanocodexBuilder, SharedAuth)> {
-        let auth = self.auth.resolve()?;
-        let builder = eval_builder_with_auth(auth.nanocodex()?, model, thinking, web_search)?;
-        Ok((builder, auth))
-    }
-
-    pub(crate) const fn thinking(&self) -> Option<Thinking> {
-        self.model_policy.thinking
-    }
-
-    pub(crate) const fn web_search(&self) -> Option<bool> {
-        self.model_policy.web_search
-    }
-}
-
 impl SharedAuth {
     fn nanocodex(&self) -> Result<OpenAiAuth> {
         match self {
@@ -658,24 +561,6 @@ impl SharedAuth {
             Self::AuthFile(path) => load_subscription_auth(path),
         }
     }
-}
-
-#[cfg(any(
-    all(target_os = "linux", not(target_env = "musl")),
-    all(target_os = "macos", target_arch = "aarch64")
-))]
-fn eval_builder_with_auth(
-    auth: OpenAiAuth,
-    model: Model,
-    thinking: Thinking,
-    web_search: bool,
-) -> Result<NanocodexBuilder> {
-    let tools = Tools::builder().web_search(web_search).build()?;
-    let openai = OpenAi::new(auth)?;
-    Ok(Nanocodex::builder(openai)
-        .model(model)
-        .thinking(thinking)
-        .tools(tools))
 }
 
 fn prepare_session_build(
@@ -733,6 +618,12 @@ const fn connected_account_default_model(auth_mode: OpenAiAuthMode) -> Model {
 
 fn selected_api_base_url(generic: Option<String>, tempo: Option<&str>) -> Option<String> {
     tempo.map(str::to_owned).or(generic)
+}
+
+/// Fails fast on endpoints the egress allowlist would refuse at connect time.
+fn check_endpoint(label: &str, url: &str) -> Result<()> {
+    let parsed = reqwest::Url::parse(url).wrap_err_with(|| format!("invalid {label} `{url}`"))?;
+    nanocodex_net_allowlist::check_url(&parsed).wrap_err_with(|| format!("{label} is not allowed"))
 }
 
 #[cfg(test)]

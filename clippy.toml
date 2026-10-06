@@ -1,0 +1,24 @@
+# OpenAI-only egress: network clients must come from `nanocodex-net-allowlist`.
+# Loopback-only sockets may opt out with a local `#[allow]` and a comment.
+disallowed-methods = [
+    { path = "reqwest::Client::new", reason = "use nanocodex_net_allowlist::client()" },
+    { path = "reqwest::Client::builder", reason = "use nanocodex_net_allowlist::client_builder()" },
+    { path = "reqwest::ClientBuilder::new", reason = "use nanocodex_net_allowlist::client_builder()" },
+    { path = "reqwest::ClientBuilder::no_proxy", reason = "removes the egress allowlist proxy guard" },
+    { path = "reqwest::ClientBuilder::dns_resolver", reason = "replaces the egress allowlist resolver" },
+    { path = "reqwest::ClientBuilder::resolve", reason = "bypasses the egress allowlist resolver" },
+    { path = "reqwest::ClientBuilder::resolve_to_addrs", reason = "bypasses the egress allowlist resolver" },
+    { path = "reqwest::get", reason = "use nanocodex_net_allowlist::client()" },
+    { path = "reqwest::blocking::Client::new", reason = "use nanocodex_net_allowlist::blocking_client_builder()" },
+    { path = "reqwest::blocking::Client::builder", reason = "use nanocodex_net_allowlist::blocking_client_builder()" },
+    { path = "reqwest::blocking::ClientBuilder::new", reason = "use nanocodex_net_allowlist::blocking_client_builder()" },
+    { path = "reqwest::blocking::ClientBuilder::no_proxy", reason = "removes the egress allowlist proxy guard" },
+    { path = "reqwest::blocking::ClientBuilder::dns_resolver", reason = "replaces the egress allowlist resolver" },
+    { path = "reqwest::blocking::get", reason = "use nanocodex_net_allowlist::blocking_client_builder()" },
+    { path = "tokio_tungstenite::connect_async", reason = "check the host with nanocodex_net_allowlist::check_host first" },
+    { path = "tokio_tungstenite::connect_async_with_config", reason = "check the host with nanocodex_net_allowlist::check_host first" },
+    { path = "tokio_tungstenite::connect_async_tls_with_config", reason = "check the host with nanocodex_net_allowlist::check_host first" },
+    { path = "tokio::net::TcpStream::connect", reason = "check the host with nanocodex_net_allowlist::check_host first" },
+    { path = "std::net::TcpStream::connect", reason = "check the host with nanocodex_net_allowlist::check_host first" },
+    { path = "std::net::TcpStream::connect_timeout", reason = "check the host with nanocodex_net_allowlist::check_host first" },
+]

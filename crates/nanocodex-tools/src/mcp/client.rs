@@ -267,7 +267,7 @@ async fn connect_http(input: HttpConnect<'_>) -> Result<ConnectedServer, String>
     let (resolved_headers, default_headers) = resolve_http_headers(headers)?;
     let replays_plaintext_proxy_credentials = default_headers.contains_key(PROXY_AUTHORIZATION);
     nanocodex_oai_api::transport::install_default_rustls_crypto_provider();
-    let http_client = reqwest::Client::builder()
+    let http_client = nanocodex_net_allowlist::client_builder()
         // Match RMCP's default: its streamed handshake responses are not always fully consumed
         // before the next request, so retaining them as idle connections can stall real peers.
         .pool_max_idle_per_host(0)

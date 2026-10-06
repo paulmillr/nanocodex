@@ -139,14 +139,6 @@ impl Backend {
             let observability = observability
                 .map(|args| args.install(true, &cwd))
                 .transpose()?;
-            let updater = crate::startup_timing::Stage::new("updater_setup");
-            if let Err(error) = crate::update::prepare_legacy_nightly_bootstrap() {
-                tracing::warn!(%error, "failed to prepare the Nanocodex updater bootstrap");
-            }
-            if let Err(error) = crate::update::ensure_default_automatic_updates() {
-                tracing::warn!(%error, "could not configure automatic updates");
-            }
-            drop(updater);
             let control_server = if nanocodex_tui_control::Server::enabled() {
                 Some(nanocodex_tui_control::Server::start("native")?)
             } else {
@@ -388,10 +380,7 @@ mod tests {
             &mut app,
             "",
             &tx,
-            Some(InitialPrompt::workflow(
-                "workflow".into(),
-                "synthetic instruction".into(),
-            )),
+            Some(InitialPrompt::plain("workflow".into())),
         )?;
         pending.drain(&mut app, &mut rx);
         app.input = "next draft".into();
@@ -401,9 +390,7 @@ mod tests {
         let WorkerCommand::Prompt { prompt, .. } = rx.try_recv()? else {
             panic!("expected initial prompt")
         };
-        let mut expected = SubmittedPrompt::text("workflow".into());
-        expected.set_instruction("synthetic instruction".into());
-        assert_eq!(prompt, expected);
+        assert_eq!(prompt, SubmittedPrompt::text("workflow".into()));
         assert_eq!(app.input, "next draft");
         assert!(rx.try_recv().is_err());
         Ok(())

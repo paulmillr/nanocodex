@@ -49,10 +49,10 @@ indicatif.workspace = true
 percent-encoding.workspace = true
 jsonschema.workspace = true
 nanocodex.workspace = true
-nanocodex-cli-auth.workspace = true
 nanocodex-durability = { workspace = true, features = ["sqlite"] }
 nanocodex-browser.workspace = true
 nanocodex-observability = { workspace = true, features = ["cli"] }
+nanocodex-net-allowlist.workspace = true
 nanocodex-subagents.workspace = true
 nanocodex-voice.workspace = true
 nix = { workspace = true, features = ["fs"] }
@@ -90,8 +90,6 @@ uuid.workspace = true
 arcbox-ext4.workspace = true
 chrono.workspace = true
 ignore.workspace = true
-nanocodex-eval.workspace = true
-nanocodex-eval-adapters.workspace = true
 nanocodex-vm.workspace = true
 regex.workspace = true
 
@@ -113,24 +111,8 @@ name = "tui_split"
 path = "tests/tui_split.rs"
 
 [[test]]
-name = "managed_memory"
-path = "tests/managed_memory.rs"
-
-[[test]]
-name = "login"
-path = "tests/login.rs"
-
-[[test]]
-name = "account_auth"
-path = "tests/account_auth.rs"
-
-[[test]]
 name = "durable_run"
 path = "tests/durable_run.rs"
-
-[[test]]
-name = "local_managed_server"
-path = "tests/local_managed_server.rs"
 
 [[bin]]
 name = "nanocodex"

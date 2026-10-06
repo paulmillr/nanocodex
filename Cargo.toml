@@ -3,8 +3,6 @@ exclude = ["third_party/codex-voice"]
 members = [
     "bin/nanocodex",
     "bin/nanocodex/tui-control",
-    "bin/nanocodex/nanocodex2",
-    "bin/nanocodex/account-auth",
     "bin/nanousd",
     "bin/nanousd-api",
     "crates/nanocodex",
@@ -24,6 +22,7 @@ members = [
     "crates/experimental/nanocodex-eval",
     "crates/experimental/nanocodex-eval-adapters",
     "crates/nanocodex-vm",
+    "crates/nanocodex-net-allowlist",
     "crates/nanocodex-oai-api",
     "crates/nanocodex-observability",
     "crates/nanocodex-subagents",
@@ -99,7 +98,6 @@ mpp = { version = "=0.11.0", git = "https://github.com/tempoxyz/mpp-rs", rev = "
 nanocodex = { version = "0.6.6", path = "crates/nanocodex" }
 nanocodex-agent = { version = "0.6.6", path = "crates/nanocodex-agent" }
 nanocodex-managed = { version = "0.6.6", path = "crates/nanocodex-managed" }
-nanocodex-cli-auth = { version = "0.6.6", path = "bin/nanocodex/account-auth" }
 nanocodex-durability = { version = "0.6.6", path = "crates/nanocodex-durability" }
 nanocodex-browser = { version = "0.6.6", path = "crates/nanocodex-browser" }
 nanocodex-computer = { version = "0.6.6", path = "crates/experimental/nanocodex-computer" }
@@ -110,6 +108,7 @@ nanocodex-voice-protocol = { version = "0.6.6", path = "crates/nanocodex-voice-p
 nanocodex-eval = { version = "0.6.6", path = "crates/experimental/nanocodex-eval" }
 nanocodex-eval-adapters = { version = "0.6.6", path = "crates/experimental/nanocodex-eval-adapters" }
 nanocodex-vm = { version = "0.6.6", path = "crates/nanocodex-vm" }
+nanocodex-net-allowlist = { version = "0.6.6", path = "crates/nanocodex-net-allowlist" }
 nanocodex-oai-api = { version = "0.6.6", path = "crates/nanocodex-oai-api" }
 nanocodex-observability = { version = "0.6.6", path = "crates/nanocodex-observability" }
 nanocodex-subagents = { version = "0.6.6", path = "crates/nanocodex-subagents" }

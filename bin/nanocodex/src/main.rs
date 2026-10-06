@@ -1,39 +1,21 @@
+// This build only connects to OpenAI hosts; the Tempo provider routes through
+// third-party payment and inference hosts.
+#[cfg(feature = "tempo")]
+compile_error!("the `tempo` feature is not available in the OpenAI-only build");
+
 mod auth;
-mod benchmark;
 mod browser;
-mod browser_cookie_sync;
 mod computer;
 mod config;
-#[cfg(feature = "tempo")]
-mod credits;
-#[cfg(any(
-    all(target_os = "linux", not(target_env = "musl")),
-    all(target_os = "macos", target_arch = "aarch64")
-))]
-mod eval;
-#[cfg(not(any(
-    all(target_os = "linux", not(target_env = "musl")),
-    all(target_os = "macos", target_arch = "aarch64")
-)))]
-#[path = "eval_unsupported.rs"]
-mod eval;
-mod hand_service;
-mod hand_setup;
-mod install;
 mod launcher;
-mod login;
-mod managed_memory;
-mod managed_server;
 mod mcp;
-#[cfg_attr(not(feature = "tempo"), path = "mpp_disabled.rs")]
+#[path = "mpp_disabled.rs"]
 mod mpp;
 mod observability;
 mod run;
-mod setup;
 mod startup_timing;
 mod subagents;
 mod tui;
-mod update;
 mod version;
 #[cfg(any(
     all(target_os = "linux", not(target_env = "musl")),
@@ -46,7 +28,6 @@ mod vm;
 )))]
 #[path = "vm_unsupported.rs"]
 mod vm;
-mod windows_hand;
 
 use std::process::ExitCode;
 
@@ -56,22 +37,6 @@ use nanocodex::agent::rollout::RolloutConfig;
 
 use config::AgentArgs;
 use observability::ObservabilityArgs;
-
-const RETRYABLE_EXIT_CODE: u8 = 75;
-
-#[derive(Debug, thiserror::Error)]
-#[error("{message}")]
-struct RetryableProcessExit {
-    message: String,
-}
-
-impl RetryableProcessExit {
-    fn new(message: impl Into<String>) -> Self {
-        Self {
-            message: message.into(),
-        }
-    }
-}
 
 #[derive(Parser)]
 #[command(
@@ -101,46 +66,19 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Install the verified release bundle and start guided setup.
-    Install(install::Install),
-    /// Sign in and set up Computer Use, Hand, and the browser extension.
-    Setup(setup::Setup),
     /// Discover and control a running interactive terminal.
     Tui(nanocodex_tui_control::Cli),
     /// Install or refresh the upstream computer-use runtime.
     Computer(computer::Computer),
-    /// Manage this computer’s Hand service or add a Linux Hand over SSH.
-    Hand(hand_setup::Hand),
-    /// Sign in to the managed Nanocodex account shared with nanocodex2.
-    Account(nanocodex_cli_auth::Account),
     /// Manage `ChatGPT` subscription login.
     Auth(auth::Auth),
-    /// Sign in to Nanocodex Connect and authorize this installation.
-    Login(login::Login),
-    /// Connect one or more hosted services to this Nanocodex installation.
-    Connect(login::Connect),
-    /// Show the current Nanocodex Connect login without displaying secrets.
-    Status(login::Status),
-    /// Revoke and remove this installation's Nanocodex Connect login.
-    Logout(login::Logout),
-    /// Inspect or synchronize local browser cookies and the encrypted account Vault.
-    Cookies(browser_cookie_sync::Cookies),
-    /// Inspect or purchase Nanocodex NANOUSD credits.
-    #[cfg(feature = "tempo")]
-    Credits(credits::Credits),
-    /// Run and inspect durable VM-backed agent evaluations.
-    Eval(eval::Eval),
     /// Internal entrypoint for one dedicated libkrun VMM process.
     #[command(hide = true)]
     VmRunConfig(vm::VmRunConfig),
     /// Run one prompt and stream JSONL events to stdout.
     Run(Box<RunCommand>),
-    /// Run a loopback-only managed-agent durability test server.
-    ManagedServer(managed_server::ManagedServer),
     /// Resume a Codex or Nanocodex thread in the interactive TUI.
     Resume(Box<ResumeCommand>),
-    /// Install, cache, or switch CLI builds.
-    Update(update::Update),
 }
 
 #[derive(Args)]
@@ -184,14 +122,13 @@ fn main() -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("Error: {error:?}");
-            ExitCode::from(process_exit_code(&error))
+            ExitCode::FAILURE
         }
     }
 }
 
 fn try_main() -> Result<()> {
     launcher::initialize_install_root();
-    launcher::dispatch_update()?;
     nanocodex::oai::transport::install_default_rustls_crypto_provider();
     // Keep direct `cargo run` behavior consistent with the Justfile without
     // requiring shell-specific syntax to load the repository's `.env` file.
@@ -217,48 +154,16 @@ fn run_with_runtime(future: impl std::future::Future<Output = Result<()>>) -> Re
     result
 }
 
-fn process_exit_code(error: &eyre::Report) -> u8 {
-    if error.downcast_ref::<RetryableProcessExit>().is_some() {
-        RETRYABLE_EXIT_CODE
-    } else {
-        1
-    }
-}
-
 async fn run(cli: Cli) -> Result<()> {
-    // Interactive startup owns maintenance after its first editable frame.
-    if !matches!(&cli.command, None | Some(Command::Resume(_))) {
-        if let Err(error) = update::prepare_legacy_nightly_bootstrap() {
-            eprintln!("warning: failed to prepare the Nanocodex updater bootstrap: {error:#}");
-        }
-        if !matches!(&cli.command, Some(Command::Update(_)))
-            && let Err(error) = update::ensure_default_automatic_updates()
-        {
-            eprintln!("Could not configure automatic updates: {error:#}");
-        }
-    }
     match cli.command {
-        Some(Command::Install(command)) => command.run().await,
-        Some(Command::Setup(command)) => command.run().await,
         Some(Command::Tui(command)) => command.run().await.map_err(Into::into),
         Some(Command::Computer(command)) => command.run().await.map_err(|error| eyre!(error)),
-        Some(Command::Hand(command)) => command.run().await,
-        Some(Command::Account(command)) => command.run().await.map_err(Into::into),
         Some(Command::Auth(command)) => command.run().await,
-        Some(Command::Login(command)) => command.run().await,
-        Some(Command::Connect(command)) => command.run().await,
-        Some(Command::Status(command)) => command.run().await,
-        Some(Command::Logout(command)) => command.run().await,
-        Some(Command::Cookies(command)) => command.run().await,
-        #[cfg(feature = "tempo")]
-        Some(Command::Credits(command)) => command.run().await,
-        Some(Command::Eval(command)) => command.run().await,
         Some(Command::VmRunConfig(_)) => unreachable!("VMM commands run before Tokio starts"),
         Some(Command::Run(command)) => {
             let _observability = command.observability.install(false, command.agent.cwd())?;
             command.run.run(command.agent, command.vm).await
         }
-        Some(Command::ManagedServer(command)) => command.run().await,
         Some(Command::Resume(command)) => {
             let codex_home = config::default_codex_home()?;
             let rollouts = RolloutConfig::new(&codex_home);
@@ -295,7 +200,6 @@ async fn run(cli: Cli) -> Result<()> {
             )
             .await
         }
-        Some(Command::Update(command)) => command.run().await,
         None => {
             tui::run_observed(
                 cli.agent,
@@ -377,72 +281,6 @@ mod tests {
             );
             assert_eq!(result.is_err(), fails);
         }
-    }
-
-    #[test]
-    fn cookie_commands_auto_detect_supported_browsers_for_an_exact_origin() {
-        let cli = Cli::try_parse_from([
-            "nanocodex",
-            "cookies",
-            "sync",
-            "https://console.twilio.com",
-            "--cookie-auth",
-            "interactive",
-        ])
-        .unwrap();
-        assert!(matches!(cli.command, Some(Command::Cookies(_))));
-        for source in ["local", "vault", "both"] {
-            let cli = Cli::try_parse_from([
-                "nanocodex",
-                "cookies",
-                "list",
-                "https://console.twilio.com",
-                "--from",
-                source,
-            ])
-            .unwrap();
-            assert!(matches!(cli.command, Some(Command::Cookies(_))));
-        }
-        assert!(
-            Cli::try_parse_from([
-                "nanocodex",
-                "cookies",
-                "sync",
-                "https://console.twilio.com/path",
-            ])
-            .is_err()
-        );
-        assert!(
-            Cli::try_parse_from([
-                "nanocodex",
-                "cookies",
-                "sync",
-                "https://console.twilio.com",
-                "--cookies",
-                "brave",
-            ])
-            .is_err()
-        );
-        assert!(
-            Cli::try_parse_from([
-                "nanocodex",
-                "cookies",
-                "list",
-                "https://console.twilio.com/path",
-            ])
-            .is_err()
-        );
-        assert!(
-            Cli::try_parse_from([
-                "nanocodex",
-                "cookies",
-                "list",
-                "https://console.twilio.com",
-                "--from",
-                "somewhere",
-            ])
-            .is_err()
-        );
     }
 
     #[cfg(feature = "tempo")]
@@ -534,35 +372,6 @@ mod tests {
             error.kind(),
             clap::error::ErrorKind::MissingRequiredArgument
         );
-    }
-
-    #[test]
-    fn hosted_connectors_have_a_focused_top_level_command() {
-        let cli = Cli::try_parse_from(["nanocodex", "connect", "github"]).unwrap();
-        assert!(matches!(cli.command, Some(Command::Connect(_))));
-
-        let login = Cli::try_parse_from(["nanocodex", "login", "--no-open"]).unwrap();
-        assert!(matches!(login.command, Some(Command::Login(_))));
-
-        let connect = Cli::try_parse_from(["nanocodex", "connect", "github", "--no-open"]).unwrap();
-        assert!(matches!(connect.command, Some(Command::Connect(_))));
-
-        let multiple = Cli::try_parse_from([
-            "nanocodex",
-            "connect",
-            "gmail",
-            "gdrive",
-            "github",
-            "--no-open",
-        ])
-        .unwrap();
-        assert!(matches!(multiple.command, Some(Command::Connect(_))));
-        assert!(Cli::try_parse_from(["nanocodex", "connect"]).is_err());
-
-        let chatgpt = Cli::try_parse_from(["nanocodex", "auth", "login", "--no-open"]).unwrap();
-        assert!(matches!(chatgpt.command, Some(Command::Auth(_))));
-
-        assert!(Cli::try_parse_from(["nanocodex", "login", "--github"]).is_err());
     }
 
     #[test]

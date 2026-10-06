@@ -86,12 +86,19 @@ pub(crate) async fn run(
                     tokio_tungstenite::tungstenite::error::UrlError::NoHostName,
                 ))?;
                 let host = host.trim_start_matches('[').trim_end_matches(']');
+                nanocodex_net_allowlist::check_host(host).map_err(|error| {
+                    tokio_tungstenite::tungstenite::Error::Io(std::io::Error::new(
+                        std::io::ErrorKind::PermissionDenied,
+                        error,
+                    ))
+                })?;
                 let port = request.uri().port_u16().unwrap_or(if connector.is_some() { 443 } else { 80 });
                 let addresses: Vec<_> = tokio::net::lookup_host((host, port)).await?.collect();
                 tracing::info!(target: "nanocodex_tools::attachment",
                     stage = "attachment.socket.resolved",
                     elapsed_ms = connect_started.elapsed().as_secs_f64() * 1000.0,
                     "attachment address resolved");
+                #[allow(clippy::disallowed_methods)] // `host` passed the egress allowlist above.
                 let stream = tokio::net::TcpStream::connect(addresses.as_slice()).await?;
                 stream.set_nodelay(true)?;
                 tracing::info!(target: "nanocodex_tools::attachment",

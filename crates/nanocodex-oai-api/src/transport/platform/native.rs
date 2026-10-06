@@ -18,7 +18,7 @@ pub(crate) struct ServicePlatform {
 impl ServicePlatform {
     pub(crate) fn new(config: &ModelConfig) -> Self {
         crate::transport::install_default_rustls_crypto_provider();
-        Self::with_http_client(config, reqwest::Client::new())
+        Self::with_http_client(config, nanocodex_net_allowlist::client())
     }
 
     pub(crate) const fn with_http_client(_config: &ModelConfig, client: reqwest::Client) -> Self {

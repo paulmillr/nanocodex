@@ -1,0 +1,28 @@
+[package]
+name = "nanocodex-net-allowlist"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "OpenAI-only network egress policy shared by every Nanocodex HTTP and WebSocket client"
+
+[features]
+default = []
+blocking = ["reqwest/blocking"]
+
+[dependencies]
+reqwest.workspace = true
+tokio = { workspace = true, features = ["net"] }
+tracing.workspace = true
+url.workspace = true
+
+[dev-dependencies]
+rustls.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true

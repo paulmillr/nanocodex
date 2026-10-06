@@ -18,63 +18,23 @@ use nanocodex::tools::mcp::{
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::login::{APP_ID, APP_ORIGIN, ScopedManagedCredential};
-
-const DEFAULT_MCP_SERVERS: [(&str, &str, &str); 6] = [
-    (
-        "openaiDeveloperDocs",
-        "https://developers.openai.com/mcp",
-        "Search OpenAI developer documentation.",
-    ),
-    (
-        "tempo",
-        "https://mcp.tempo.xyz",
-        "Tempo network and protocol tools.",
-    ),
-    (
-        "mercator",
-        MERCATOR_MCP_URL,
-        "Discovers and composes Tempo services and MPP flows; paid jobs require explicit payment authority.",
-    ),
-    (
-        "cloudflare",
-        "https://docs.mcp.cloudflare.com/mcp",
-        "Search Cloudflare developer documentation.",
-    ),
-    (
-        "viem",
-        "https://viem.sh/api/mcp",
-        "Search Viem developer documentation.",
-    ),
-    (
-        "vocs",
-        "https://vocs.dev/api/mcp",
-        "Search Vocs developer documentation.",
-    ),
-];
-pub(crate) const MERCATOR_MCP_URL: &str = "https://mercator.sh/mcp";
+// This build only talks to OpenAI hosts; keep the default catalog to OpenAI's docs.
+const DEFAULT_MCP_SERVERS: [(&str, &str, &str); 1] = [(
+    "openaiDeveloperDocs",
+    "https://developers.openai.com/mcp",
+    "Search OpenAI developer documentation.",
+)];
 
 fn default_parallel_tools(name: &str) -> &'static [&'static str] {
     match name {
         "openaiDeveloperDocs" => &["fetch_openai_doc", "search_openai_docs"],
-        "tempo" => &["code", "search"],
-        "mercator" => &[
-            "get_suggested_queries",
-            "get_connection_status",
-            "search_services",
-        ],
-        "cloudflare" => &["search_cloudflare_documentation"],
-        "viem" | "vocs" => &["list_pages", "read_page", "search_docs", "search_source"],
         _ => &[],
     }
 }
 
 #[derive(Args)]
 pub(crate) struct McpArgs {
-    #[arg(skip)]
-    disabled: bool,
-
-    /// Load the public MCP catalog, including Mercator discovery. Paid calls require separate authority.
+    /// Load the default MCP catalog (OpenAI developer docs).
     #[arg(
         long,
         env = "NANOCODEX_MCP_DEFAULTS",
@@ -215,26 +175,10 @@ struct NamedHeaderValue {
 }
 
 impl McpArgs {
-    pub(crate) const fn loads_managed(&self) -> bool {
-        !self.disabled
-    }
-
-    pub(crate) fn disable(&mut self) {
-        self.disabled = true;
-        self.mcp_defaults = false;
-        self.mcp_codex_config = false;
-        self.http.clear();
-        self.stdio.clear();
-        self.arguments.clear();
-        self.bearer_env.clear();
-        self.header_env.clear();
-    }
-
     pub(crate) fn build(
         self,
         codex_home: &Path,
         tempo: Option<&crate::mpp::MppAdapter>,
-        managed: Option<&ScopedManagedCredential>,
     ) -> Result<Option<ConfiguredMcp>> {
         if self.mcp_startup_timeout == 0 || self.mcp_tool_timeout == 0 {
             bail!("MCP timeouts must be greater than zero");
@@ -242,6 +186,7 @@ impl McpArgs {
 
         let mut servers = BTreeMap::new();
         for endpoint in self.http {
+            check_mcp_url(&endpoint.name, &endpoint.value)?;
             insert_server(&mut servers, endpoint, Transport::Http)?;
         }
         for command in self.stdio {
@@ -258,6 +203,13 @@ impl McpArgs {
                     continue;
                 }
                 if let Some(server) = server {
+                    if let Transport::Http(url) = &server.transport
+                        && let Err(error) = check_mcp_url(&name, url)
+                    {
+                        tracing::warn!(%error, "skipping MCP server from Codex config");
+                        eprintln!("warning: skipping MCP server from Codex config: {error:#}");
+                        continue;
+                    }
                     servers.insert(name, server);
                 }
             }
@@ -289,11 +241,6 @@ impl McpArgs {
                             .collect(),
                     });
             }
-        }
-        if !self.disabled
-            && let Some(managed) = managed
-        {
-            insert_managed_mcp_servers(&mut servers, managed)?;
         }
         if servers.is_empty() {
             if self.arguments.is_empty() && self.bearer_env.is_empty() && self.header_env.is_empty()
@@ -341,93 +288,11 @@ impl McpArgs {
     }
 }
 
-fn insert_managed_mcp_servers(
-    servers: &mut BTreeMap<String, ServerConfig>,
-    credential: &ScopedManagedCredential,
-) -> Result<()> {
-    for connection in credential.mcp_connections() {
-        let name = unique_managed_server_name(connection.name(), connection.id(), servers);
-        servers.insert(
-            name,
-            managed_mcp_server_config(
-                credential.origin(),
-                credential.grant_id(),
-                credential.bearer_token(),
-                connection,
-            )?,
-        );
-    }
-    Ok(())
-}
-
-fn managed_mcp_server_config(
-    origin: &reqwest::Url,
-    grant_id: &str,
-    bearer: &str,
-    connection: &crate::login::ManagedMcpConnection,
-) -> Result<ServerConfig> {
-    let url = origin
-        .join(&format!("/v1/grants/{grant_id}/mcp/{}", connection.id()))
-        .wrap_err("invalid managed MCP proxy URL")?;
-    Ok(ServerConfig {
-        transport: Transport::Http(url.into()),
-        description: Some(format!(
-            "Managed {} connection through Nanocodex Connect.",
-            connection.name()
-        )),
-        arguments: Vec::new(),
-        environment: BTreeMap::new(),
-        cwd: None,
-        bearer_env: None,
-        bearer: Some(bearer.to_owned()),
-        headers: BTreeMap::from([
-            ("origin".to_owned(), APP_ORIGIN.to_owned()),
-            ("x-nanocodex-app-id".to_owned(), APP_ID.to_owned()),
-        ]),
-        header_env: Vec::new(),
-        startup_timeout: None,
-        tool_timeout: None,
-        enabled_tools: None,
-        disabled_tools: Vec::new(),
-        parallel_tools: Vec::new(),
-    })
-}
-
-fn unique_managed_server_name(
-    display_name: &str,
-    connection_id: &str,
-    servers: &BTreeMap<String, ServerConfig>,
-) -> String {
-    let mut slug = String::new();
-    let mut separator = false;
-    for character in display_name.chars() {
-        if character.is_ascii_alphanumeric() {
-            if separator && !slug.is_empty() {
-                slug.push('-');
-            }
-            separator = false;
-            if slug.len() < 40 {
-                slug.push(character.to_ascii_lowercase());
-            }
-        } else {
-            separator = true;
-        }
-    }
-    if slug.is_empty() {
-        slug.push_str("connection");
-    }
-    let id_prefix = &connection_id[..8];
-    let base = format!("managed-{slug}-{id_prefix}");
-    if !servers.contains_key(&base) {
-        return base;
-    }
-    for suffix in 2_u32.. {
-        let candidate = format!("{base}-{suffix}");
-        if !servers.contains_key(&candidate) {
-            return candidate;
-        }
-    }
-    unreachable!("an unbounded numeric suffix always has a free MCP server name")
+fn check_mcp_url(name: &str, url: &str) -> Result<()> {
+    let parsed = reqwest::Url::parse(url)
+        .wrap_err_with(|| format!("MCP server `{name}` has an invalid URL"))?;
+    nanocodex_net_allowlist::check_url(&parsed)
+        .wrap_err_with(|| format!("MCP server `{name}` is not allowed"))
 }
 
 fn build_mcp(
@@ -930,7 +795,6 @@ mod tests {
 
     fn args() -> McpArgs {
         McpArgs {
-            disabled: false,
             mcp_defaults: true,
             mcp_codex_config: true,
             http: Vec::new(),
@@ -944,68 +808,13 @@ mod tests {
     }
 
     #[test]
-    fn managed_mcp_config_uses_exact_proxy_url_and_scoped_headers() {
-        let origin = reqwest::Url::parse("https://connect.example/").unwrap();
-        let grant_id = format!("0x{}", "33".repeat(32));
-        let connection = crate::login::ManagedMcpConnection {
-            id: "a".repeat(43),
-            name: "Linear Workspace".to_owned(),
-        };
-        let config =
-            managed_mcp_server_config(&origin, &grant_id, "grant-token", &connection).unwrap();
-        assert!(matches!(
-            config.transport,
-            Transport::Http(ref url)
-                if url == &format!(
-                    "https://connect.example/v1/grants/{grant_id}/mcp/{}",
-                    connection.id
-                )
-        ));
-        assert_eq!(config.bearer.as_deref(), Some("grant-token"));
-        assert_eq!(
-            config.headers,
-            BTreeMap::from([
-                ("origin".to_owned(), APP_ORIGIN.to_owned()),
-                ("x-nanocodex-app-id".to_owned(), APP_ID.to_owned()),
-            ])
-        );
-        assert!(config.bearer_env.is_none());
-    }
-
-    #[test]
-    fn managed_mcp_names_preserve_existing_servers_without_collisions() {
-        let connection_id = "a".repeat(43);
-        let mut servers = BTreeMap::new();
-        let first = unique_managed_server_name("Linear Workspace", &connection_id, &servers);
-        assert_eq!(first, "managed-linear-workspace-aaaaaaaa");
-        servers.insert(
-            first.clone(),
-            managed_mcp_server_config(
-                &reqwest::Url::parse("https://connect.example/").unwrap(),
-                &format!("0x{}", "33".repeat(32)),
-                "grant-token",
-                &crate::login::ManagedMcpConnection {
-                    id: connection_id.clone(),
-                    name: "Linear Workspace".to_owned(),
-                },
-            )
-            .unwrap(),
-        );
-        assert_eq!(
-            unique_managed_server_name("Linear Workspace", &connection_id, &servers),
-            "managed-linear-workspace-aaaaaaaa-2"
-        );
-        assert!(servers.contains_key(&first));
-    }
-
-    #[test]
     fn defaults_can_be_disabled() {
         assert!(
             McpArgs {
                 mcp_defaults: false,
                 ..args()
             }
-            .build(Path::new("/missing"), None, None)
+            .build(Path::new("/missing"), None)
             .unwrap()
             .is_none()
         );
@@ -1015,28 +824,41 @@ mod tests {
     fn explicit_server_can_override_a_default_name() {
         let mut args = args();
         args.http.push(NamedValue {
-            name: "tempo".to_owned(),
-            value: "https://example.test/mcp".to_owned(),
+            name: "openaiDeveloperDocs".to_owned(),
+            value: "https://api.openai.com/mcp".to_owned(),
         });
 
-        assert!(
-            args.build(Path::new("/missing"), None, None)
-                .unwrap()
-                .is_some()
-        );
+        assert!(args.build(Path::new("/missing"), None).unwrap().is_some());
+    }
+
+    #[test]
+    fn explicit_non_openai_servers_are_rejected() {
+        for value in [
+            "https://mercator.sh/mcp",
+            "https://openai.com.example.test/mcp",
+            "http://192.0.2.1/mcp",
+        ] {
+            let mut args = args();
+            args.http.push(NamedValue {
+                name: "remote".to_owned(),
+                value: value.to_owned(),
+            });
+            let error = args.build(Path::new("/missing"), None).err().unwrap();
+            assert!(format!("{error:#}").contains("only connects to OpenAI hosts"));
+        }
     }
 
     #[test]
     fn duplicate_explicit_servers_are_rejected() {
         let mut args = args();
-        for value in ["https://one.test/mcp", "https://two.test/mcp"] {
+        for value in ["https://api.openai.com/one", "https://api.openai.com/two"] {
             args.http.push(NamedValue {
-                name: "tempo".to_owned(),
+                name: "docs".to_owned(),
                 value: value.to_owned(),
             });
         }
 
-        assert!(args.build(Path::new("/missing"), None, None).is_err());
+        assert!(args.build(Path::new("/missing"), None).is_err());
     }
 
     #[tokio::test]
@@ -1046,7 +868,7 @@ mod tests {
             codex_home.path().join("config.toml"),
             r#"
 [mcp_servers.centaur-paradigm]
-url = "https://centaur.example.test/mcp"
+url = "https://api.openai.com/mcp"
 startup_timeout_sec = 12.5
 tool_timeout_sec = 45
 enabled_tools = ["search"]
@@ -1063,12 +885,15 @@ MODE = "read-only"
 [mcp_servers.tempo]
 url = "https://disabled.example.test/mcp"
 enabled = false
+
+[mcp_servers.mercator]
+url = "https://mercator.sh/mcp"
 "#,
         )
         .unwrap();
         let mut args = args();
         args.mcp_codex_config = true;
-        let mcp = args.build(codex_home.path(), None, None).unwrap().unwrap();
+        let mcp = args.build(codex_home.path(), None).unwrap().unwrap();
         let tools = Tools::builder()
             .exposure(ToolExposure::DirectAndCodeMode)
             .provider(mcp.provider)
@@ -1082,11 +907,12 @@ enabled = false
         assert!(encoded.contains("centaur-paradigm"));
         assert!(encoded.contains("local"));
         assert!(encoded.contains("openaiDeveloperDocs"));
-        assert!(encoded.contains("mercator"));
-        assert!(encoded.contains("cloudflare"));
-        assert!(encoded.contains("viem"));
-        assert!(encoded.contains("vocs"));
-        assert!(!encoded.contains("\n- tempo:"));
+        for skipped in ["mercator", "cloudflare", "viem", "vocs", "\n- tempo:"] {
+            assert!(
+                !encoded.contains(skipped),
+                "{skipped} must not be configured"
+            );
+        }
     }
 
     #[test]
@@ -1403,10 +1229,7 @@ tool_timeout_sec = 9.5
         )
         .unwrap();
 
-        let mcp = args()
-            .build(Path::new("/missing"), None, None)
-            .unwrap()
-            .unwrap();
+        let mcp = args().build(Path::new("/missing"), None).unwrap().unwrap();
         let default_tools = Tools::builder().provider(mcp.provider).build().unwrap();
         let with_defaults = serde_json::to_vec(
             &ToolRuntime::new_with_tools(".", None, None, &default_tools)

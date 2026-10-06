@@ -978,7 +978,7 @@ fn multipart_call_body(offer: &str, session: &Value) -> Result<Vec<u8>, CallAtte
 
 fn realtime_http_client() -> Client {
     static CLIENT: OnceLock<Client> = OnceLock::new();
-    CLIENT.get_or_init(Client::new).clone()
+    CLIENT.get_or_init(nanocodex_net_allowlist::client).clone()
 }
 
 async fn bounded_body(

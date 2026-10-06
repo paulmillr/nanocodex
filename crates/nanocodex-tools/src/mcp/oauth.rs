@@ -440,28 +440,8 @@ fn validate_authorization_server_endpoints(metadata: &AuthorizationMetadata) -> 
     }
 
     if let Some(issuer) = issuer {
-        let compatible_provider = matches!(
-            (
-                issuer.as_str(),
-                authorization_endpoint
-                    .origin()
-                    .ascii_serialization()
-                    .as_str(),
-                token_endpoint.origin().ascii_serialization().as_str(),
-            ),
-            (
-                "https://api.figma.com/",
-                "https://www.figma.com",
-                "https://api.figma.com",
-            ) | (
-                "https://agent.robinhood.com/mcp/trading",
-                "https://robinhood.com",
-                "https://api.robinhood.com",
-            )
-        );
         if authorization_endpoint.origin() == issuer.origin()
             || authorization_endpoint.origin() == token_endpoint.origin()
-            || compatible_provider
         {
             return Ok(());
         }
@@ -738,7 +718,7 @@ fn oauth_http_client(headers: BTreeMap<String, SecretSource>) -> Result<reqwest:
     let replays_plaintext_proxy_credentials =
         resolved.contains_key(reqwest::header::PROXY_AUTHORIZATION);
     nanocodex_oai_api::transport::install_default_rustls_crypto_provider();
-    reqwest::Client::builder()
+    nanocodex_net_allowlist::client_builder()
         .default_headers(resolved)
         .pool_max_idle_per_host(0)
         .redirect(super::same_origin_redirect_policy(
@@ -992,7 +972,7 @@ mod tests {
         let transport = transport_from_credentials(
             server_name,
             &server_url,
-            reqwest::Client::new(),
+            nanocodex_net_allowlist::client(),
             store.clone(),
             credentials,
             &metadata_cache,

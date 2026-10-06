@@ -264,6 +264,8 @@ async fn https_uses_the_configured_http_client() -> Result<()> {
         reqwest::header::HeaderValue::from_static("configured"),
     );
     nanocodex_oai_api::transport::install_default_rustls_crypto_provider();
+    // Exercises a caller-supplied client against a loopback server.
+    #[allow(clippy::disallowed_methods)]
     let client = reqwest::Client::builder()
         .default_headers(headers)
         .build()?;

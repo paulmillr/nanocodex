@@ -36,7 +36,7 @@ impl ImageGenerationHandler {
     #[cfg(test)]
     pub(super) fn new(config: ImageGenerationConfig) -> Self {
         nanocodex_oai_api::transport::install_default_rustls_crypto_provider();
-        Self::with_client(config, reqwest::Client::new())
+        Self::with_client(config, nanocodex_net_allowlist::client())
     }
 
     pub(super) fn with_client(config: ImageGenerationConfig, client: reqwest::Client) -> Self {

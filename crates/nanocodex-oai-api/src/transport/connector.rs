@@ -34,6 +34,8 @@ pub(crate) async fn connect_async(
         .host()
         .ok_or_else(|| invalid_input("WebSocket URL has no host"))?
         .to_owned();
+    nanocodex_net_allowlist::check_host(&host)
+        .map_err(|error| Error::Io(io::Error::new(io::ErrorKind::PermissionDenied, error)))?;
     let secure = match request.uri().scheme_str() {
         Some("wss") => true,
         Some("ws") => false,
@@ -415,6 +417,8 @@ where
     Ok(())
 }
 
+// The target host is checked in `connect_async`; a proxy authority comes from the user's environment.
+#[allow(clippy::disallowed_methods)]
 async fn connect_happy_eyeballs(address: impl tokio::net::ToSocketAddrs) -> Result<TcpStream> {
     let addresses = tokio::net::lookup_host(address)
         .await
@@ -520,6 +524,23 @@ fn invalid_input(message: impl Into<String>) -> Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn refuses_hosts_outside_the_egress_allowlist() {
+        use tokio_tungstenite::tungstenite::client::IntoClientRequest as _;
+
+        for url in [
+            "wss://mcp.tempo.xyz/",
+            "ws://192.0.2.1:9/",
+            "wss://api.openai.com.example.test/",
+        ] {
+            let request = url.into_client_request().unwrap();
+            let Err(Error::Io(error)) = connect_async(request).await else {
+                panic!("{url} must be refused before connecting");
+            };
+            assert_eq!(error.kind(), io::ErrorKind::PermissionDenied, "{url}");
+        }
+    }
 
     #[test]
     fn interleaves_address_families() {

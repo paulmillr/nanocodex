@@ -95,7 +95,7 @@ impl ToolRuntime {
                 Arc::new(shell::WriteStdinHandler::new(Arc::clone(&sessions))),
             ]);
         }
-        let remote_http_client = remote_http_client.unwrap_or_default();
+        let remote_http_client = remote_http_client.unwrap_or_else(nanocodex_net_allowlist::client);
         if let Some(web_search) = web_search {
             handlers.push(Arc::new(web_search::WebSearchHandler::with_client(
                 web_search,

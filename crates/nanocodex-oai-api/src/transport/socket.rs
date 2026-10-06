@@ -471,8 +471,8 @@ mod tests {
     async fn respects_http_proxy_for_websocket_connections() -> Result<()> {
         run_proxy_test(
             "HTTP_PROXY",
-            "ws://unreachable.nanocodex.invalid/v1/responses",
-            "unreachable.nanocodex.invalid:80",
+            "ws://unreachable.openai.com/v1/responses",
+            "unreachable.openai.com:80",
             None,
         )
         .await
@@ -486,8 +486,8 @@ mod tests {
     async fn respects_https_proxy_for_secure_websocket_connections() -> Result<()> {
         run_proxy_test(
             "HTTPS_PROXY",
-            "wss://unreachable.nanocodex.invalid/v1/responses",
-            "unreachable.nanocodex.invalid:443",
+            "wss://unreachable.openai.com/v1/responses",
+            "unreachable.openai.com:443",
             Some(502),
         )
         .await

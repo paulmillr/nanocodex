@@ -33,7 +33,6 @@ const MAX_PDF_BYTES: usize = 64 * 1024 * 1024;
 const MAX_LIGHTHOUSE_REPORT_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_CRUX_RESPONSE_BYTES: usize = 1024 * 1024;
 const LIGHTHOUSE_TIMEOUT: Duration = Duration::from_mins(2);
-const DEFAULT_CRUX_ENDPOINT: &str = "https://chromeuxreport.googleapis.com/v1/records:queryRecord";
 
 pub(super) async fn pdf(
     page: &Page,
@@ -322,12 +321,12 @@ pub(super) async fn crux(
             }
         }
     };
-    let endpoint = match &client.endpoint {
-        Some(endpoint) => endpoint.clone(),
-        None => Url::parse(DEFAULT_CRUX_ENDPOINT)?,
+    // The public CrUX API is a Google host, which the OpenAI-only build cannot reach.
+    let Some(endpoint) = client.endpoint.clone() else {
+        return Err(BrowserError::CruxNotConfigured);
     };
     nanocodex_oai_api::transport::install_default_rustls_crypto_provider();
-    let response = reqwest::Client::new()
+    let response = nanocodex_net_allowlist::client()
         .post(endpoint)
         .query(&[("key", client.api_key.as_str())])
         .json(&request)
@@ -637,7 +636,7 @@ mod tests {
         let address = listener.local_addr().expect("read the local test address");
         drop(listener);
         let secret = "crux-test-secret";
-        let error = reqwest::Client::new()
+        let error = nanocodex_net_allowlist::client()
             .get(format!("http://{address}/query?key={secret}"))
             .send()
             .await

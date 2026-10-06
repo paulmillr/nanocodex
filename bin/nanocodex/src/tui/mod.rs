@@ -7,7 +7,6 @@ mod diff;
     all(target_os = "linux", not(target_env = "musl")),
     all(target_os = "macos", target_arch = "aarch64")
 ))]
-mod eval_attach;
 mod external_editor;
 mod markdown;
 mod notification;
@@ -73,7 +72,6 @@ use crate::{
     all(target_os = "linux", not(target_env = "musl")),
     all(target_os = "macos", target_arch = "aarch64")
 ))]
-pub(crate) use eval_attach::attach_evaluation;
 pub(crate) use resume_picker::select_resume_session;
 
 const BTW_BOUNDARY: &str = r"You are answering an ephemeral BTW side question.
@@ -139,13 +137,6 @@ impl InitialPrompt {
         Self {
             display,
             instruction: None,
-        }
-    }
-
-    pub(crate) const fn workflow(display: String, instruction: String) -> Self {
-        Self {
-            display,
-            instruction: Some(instruction),
         }
     }
 }
@@ -752,15 +743,6 @@ enum VoiceControl {
     Start(Option<RealtimeVoice>),
     Stop,
     List,
-}
-
-pub(crate) async fn run(
-    config: AgentArgs,
-    vm: crate::vm::VmArgs,
-    initial_prompt: Option<InitialPrompt>,
-    resume: Option<DurableSession>,
-) -> Result<()> {
-    run_observed(config, vm, initial_prompt, resume, None).await
 }
 
 #[allow(
@@ -1819,12 +1801,6 @@ impl AgentWorker {
             }));
             return;
         };
-        if let Err(error) = crate::update::ensure_installed_voice_runtime().await {
-            drop(self.updates.send(WorkerEvent::VoiceFailed {
-                error: format!("failed to repair installed voice runtime: {error:#}"),
-            }));
-            return;
-        }
         let chatgpt_voice = realtime.auth_mode() == nanocodex::oai::auth::OpenAiAuthMode::ChatGpt;
         let mut builder = VoiceSessionBuilder::new(realtime, self.main.agent.clone())
             .client_managed_handoffs(chatgpt_voice)
@@ -3727,27 +3703,6 @@ fn classify_submission(input: impl Into<SubmittedPrompt>) -> Submission {
         input.set_instruction(instruction);
         return Submission::Prompt(input);
     }
-    if trimmed == "/benchmark" || trimmed.starts_with("/benchmark ") {
-        let display = trimmed.to_owned();
-        let argument = trimmed
-            .strip_prefix("/benchmark")
-            .map(str::trim)
-            .filter(|argument| !argument.is_empty());
-        if argument.is_some_and(|argument| argument.split_whitespace().count() != 1) {
-            return Submission::InvalidCommand("Usage: /benchmark [profile]".to_owned());
-        }
-        let executable = std::env::current_exe().ok();
-        let instruction = crate::benchmark::prompt(
-            argument,
-            std::path::Path::new("nanocodex.toml"),
-            None,
-            None,
-            executable.as_deref(),
-        );
-        input.set_display(display);
-        input.set_instruction(instruction);
-        return Submission::Prompt(input);
-    }
     if trimmed == "/voice" {
         return Submission::Voice(VoiceControl::Toggle);
     }
@@ -4146,18 +4101,6 @@ mod tests {
         assert_eq!(
             classify_submission(" /trace ".to_owned()),
             Submission::Trace
-        );
-        let Submission::Prompt(benchmark) = classify_submission(" /benchmark release ") else {
-            panic!("benchmark must expand into a private workflow prompt");
-        };
-        assert_eq!(benchmark.display(), "/benchmark release");
-        assert_ne!(
-            benchmark,
-            super::app::SubmittedPrompt::text("/benchmark release".to_owned())
-        );
-        assert_eq!(
-            classify_submission("/benchmark release extra"),
-            Submission::InvalidCommand("Usage: /benchmark [profile]".to_owned())
         );
         assert_eq!(
             classify_submission(" /voice "),

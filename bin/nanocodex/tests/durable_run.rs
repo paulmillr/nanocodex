@@ -402,8 +402,6 @@ fn durable_command_for_request(
         .arg("false")
         .arg("--subagents")
         .arg("false")
-        .arg("--memory")
-        .arg("false")
         .arg(prompt)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

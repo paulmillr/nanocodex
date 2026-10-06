@@ -178,18 +178,6 @@ async fn interrupt_signal() -> Result<()> {
     }
 }
 
-pub(crate) async fn run_prompt(prompt: String, config: AgentArgs, vm: VmArgs) -> Result<()> {
-    Run {
-        prompt,
-        request_id: None,
-        local_durability: None,
-        local_durability_state_id: None,
-        repeat: 1,
-    }
-    .run(config, vm)
-    .await
-}
-
 async fn write_turn_jsonl(
     events: &mut AgentEvents,
     output: &mut (impl AsyncWrite + Unpin),

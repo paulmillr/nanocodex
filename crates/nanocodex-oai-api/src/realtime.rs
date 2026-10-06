@@ -3724,6 +3724,7 @@ fn map_websocket_error(error: WebSocketError) -> RealtimeError {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)] // Loopback WebSocket test peers.
 mod tests {
     use std::{collections::BTreeMap, time::Duration};
 

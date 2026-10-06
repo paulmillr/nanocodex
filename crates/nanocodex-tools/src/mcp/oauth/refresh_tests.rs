@@ -99,7 +99,7 @@ async fn runtime_for(
     transport_from_credentials(
         server_name,
         &server_url,
-        reqwest::Client::new(),
+        nanocodex_net_allowlist::client(),
         store,
         credentials,
         &metadata_cache,
@@ -510,7 +510,7 @@ async fn server_401_refreshes_and_retries_once() {
     let transport = transport_from_credentials(
         "refresh-test",
         &server_url,
-        reqwest::Client::new(),
+        nanocodex_net_allowlist::client(),
         Arc::clone(&store) as Arc<dyn McpOAuthStore>,
         credentials,
         &metadata_cache,

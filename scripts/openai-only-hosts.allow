@@ -1,0 +1,16 @@
+# Hosts embedded in the release `nanocodex` binary that it never contacts.
+# Reviewed for the OpenAI-only build; used by scripts/check-openai-only-hosts.sh.
+# Format: <host>  <where it comes from>
+
+docs.rs                      rustls/reqwest panic and error messages
+github.com                   clap "file a bug report" panic text; syntect grammar comments
+example.com                  placeholder citation URLs in model instructions
+erlang.org                   syntect/two-face syntax definition metadata
+groovy-lang.org              syntect/two-face syntax definition metadata
+html.spec.whatwg.org         html5 parsing error references
+mimesniff.spec.whatwg.org    MIME sniffing references
+json-schema.org              JSON Schema $schema identifiers (jsonschema has no remote resolution)
+ns.adobe.com                 XMP metadata namespace in image codecs
+schemas.xmlsoap.org          XML namespace identifiers
+www.webrtc.org               WebRTC RTP header extension identifiers
+www.ietf.org                 WebRTC RTP header extension identifiers

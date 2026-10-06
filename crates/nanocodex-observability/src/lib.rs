@@ -233,7 +233,7 @@ impl ObservabilityBuilder {
                 .with_http()
                 .with_endpoint(endpoint)
                 .with_protocol(Protocol::HttpBinary)
-                .with_http_client(reqwest::Client::new())
+                .with_http_client(nanocodex_net_allowlist::client())
                 .build()?;
             let processor = TokioBatchSpanProcessor::builder(exporter, runtime::Tokio).build();
             return Ok(Some(
@@ -251,7 +251,7 @@ impl ObservabilityBuilder {
             .with_http()
             .with_endpoint(endpoint)
             .with_protocol(Protocol::HttpBinary)
-            .with_http_client(reqwest::blocking::Client::new())
+            .with_http_client(nanocodex_net_allowlist::blocking_client())
             .build()?;
         let processor = opentelemetry_sdk::trace::BatchSpanProcessor::builder(exporter).build();
         Ok(Some(

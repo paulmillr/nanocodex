@@ -25,6 +25,7 @@ client = [
     "dep:base64",
     "dep:getrandom",
     "dep:http",
+    "dep:nanocodex-net-allowlist",
     "dep:reqwest",
     "dep:rustls",
     "dep:sha2",
@@ -60,6 +61,7 @@ web-time = { workspace = true, optional = true }
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 getrandom = { workspace = true, optional = true }
+nanocodex-net-allowlist = { workspace = true, optional = true }
 reqwest = { workspace = true, optional = true }
 rustls = { workspace = true, features = ["std"], optional = true }
 rustls-native-certs = { workspace = true, optional = true }

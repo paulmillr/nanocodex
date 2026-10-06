@@ -30,6 +30,7 @@ nanocodex-oai-api.workspace = true
 nanocodex-tools.workspace = true
 percent-encoding.workspace = true
 reflink-copy.workspace = true
+nanocodex-net-allowlist.workspace = true
 reqwest = { workspace = true, features = ["query", "stream"] }
 rusqlite = { workspace = true, features = ["backup"] }
 safari-binarycookies.workspace = true

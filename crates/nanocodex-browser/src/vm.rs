@@ -570,7 +570,7 @@ impl BrowserVmRuntime {
         local: SocketAddr,
     ) -> Result<Url, BrowserVmError> {
         nanocodex_oai_api::transport::install_default_rustls_crypto_provider();
-        let client = reqwest::Client::builder()
+        let client = nanocodex_net_allowlist::client_builder()
             .timeout(Duration::from_millis(500))
             .build()
             .map_err(BrowserVmError::HttpClient)?;

@@ -158,7 +158,7 @@ impl IosBrowser {
         Ok(Self {
             inner: Arc::new(IosBrowserInner {
                 config,
-                client: Client::builder()
+                client: nanocodex_net_allowlist::client_builder()
                     .timeout(std::time::Duration::from_secs(30))
                     .build()?,
                 output_dir: tempfile::tempdir()?,
