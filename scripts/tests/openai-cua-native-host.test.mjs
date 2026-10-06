@@ -39,6 +39,9 @@ for (const [name, fn] of [
     const plist = (_, key) => key === 'CFBundleVersion' ? '9922' : 'Codex';
     const first = await configuration(env, 'darwin', plist);
     const next = await configuration(env, 'darwin', (_, key) => key === 'CFBundleVersion' ? '9923' : 'Codex');
+    assert.equal(first.codex, '/immutable/Codex.app/Contents/Resources/codex');
+    assert.equal((await configuration({ ...env, NANOCODEX_CUA_NATIVE_CODEX: '/immutable/codex-cli/bin/codex' }, 'darwin', plist)).codex, '/immutable/codex-cli/bin/codex');
+    await assert.rejects(configuration({ ...env, NANOCODEX_CUA_NATIVE_CODEX: 'codex' }, 'darwin', plist), /absolute filesystem/);
     assert.notEqual(first.socket, next.socket);
     assert.equal(first.node, '/immutable/Codex.app/Contents/Resources/cua_node/bin/node');
     assert.equal(first.gui, undefined);

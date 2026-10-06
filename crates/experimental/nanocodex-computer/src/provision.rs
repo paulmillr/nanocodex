@@ -226,6 +226,102 @@ mod mac {
     const MODULES: &str = "cua_node/lib/node_modules";
     const SKY: &str = "@oai/sky/Codex Computer Use.app";
     const ENTRY: &str = "@oai/cua-repl/bin/cua-repl.mjs";
+    // Newer upstream builds ship the CLI as a shell shim in front of a nested
+    // signed CodexCLI.app; older builds ship a single Mach-O. Each layout is
+    // (entry point, sealed tree, signed executable), relative to Resources.
+    const CODEX_LAYOUTS: [(&str, &str, &str); 2] = [
+        (
+            "codex-cli/bin/codex",
+            "codex-cli",
+            "codex-cli/CodexCLI.app/Contents/MacOS/codex",
+        ),
+        ("codex", "codex", "codex"),
+    ];
+
+    fn codex_layout(resources: &Path) -> (&'static str, &'static str, &'static str) {
+        CODEX_LAYOUTS
+            .into_iter()
+            .find(|(entry, ..)| resources.join(entry).is_file())
+            .unwrap_or(CODEX_LAYOUTS[0])
+    }
+
+    /// The CLI to run. Gatekeeper assesses a nested app bundle against its
+    /// outermost bundle, which is deliberately sparse here and so reported as
+    /// damaged; the nested-bundle layout therefore runs from its linked mirror.
+    fn codex_executable(version: &Path) -> PathBuf {
+        let legacy = version.join(APP).join(RESOURCES).join("codex");
+        if legacy.is_file() {
+            legacy
+        } else {
+            version.join("codex-cli/bin/codex")
+        }
+    }
+
+    /// Mirror the verified CLI tree beside the sparse bundle with hard links.
+    /// Nothing is copied, and the bundle fingerprint (inode, link count, ctime)
+    /// still covers every linked file.
+    fn link_codex_cli(version: &Path) -> Result<(), String> {
+        let source = version.join(APP).join(RESOURCES).join("codex-cli");
+        let target = version.join("codex-cli");
+        if !source.is_dir() || mirrored(&source, &target).unwrap_or(false) {
+            return Ok(());
+        }
+        match fs::symlink_metadata(&target) {
+            Ok(metadata) if metadata.is_dir() => io(fs::remove_dir_all(&target))?,
+            Ok(_) => io(fs::remove_file(&target))?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.to_string()),
+        }
+        let staging = version.join(format!(".codex-cli-{}", nonce()));
+        let result = mirror(&source, &staging).and_then(|()| io(fs::rename(&staging, &target)));
+        if result.is_err() {
+            let _ = fs::remove_dir_all(&staging);
+        }
+        result
+    }
+
+    fn mirror(source: &Path, target: &Path) -> Result<(), String> {
+        io(fs::create_dir(target))?;
+        for entry in io(fs::read_dir(source))? {
+            let entry = io(entry)?;
+            let (from, to) = (entry.path(), target.join(entry.file_name()));
+            let kind = io(entry.file_type())?;
+            if kind.is_dir() {
+                mirror(&from, &to)?;
+            } else if kind.is_symlink() {
+                io(std::os::unix::fs::symlink(io(fs::read_link(&from))?, &to))?;
+            } else {
+                io(fs::hard_link(&from, &to))?;
+            }
+        }
+        Ok(())
+    }
+
+    fn mirrored(source: &Path, target: &Path) -> Result<bool, String> {
+        use std::os::unix::fs::MetadataExt;
+
+        let mut expected = 0;
+        for entry in io(fs::read_dir(source))? {
+            let entry = io(entry)?;
+            expected += 1;
+            let (from, to) = (entry.path(), target.join(entry.file_name()));
+            let (a, b) = (
+                io(fs::symlink_metadata(&from))?,
+                io(fs::symlink_metadata(&to))?,
+            );
+            let same = if a.is_dir() {
+                b.is_dir() && mirrored(&from, &to)?
+            } else if a.is_symlink() {
+                b.is_symlink() && io(fs::read_link(&from))? == io(fs::read_link(&to))?
+            } else {
+                b.is_file() && (a.dev(), a.ino()) == (b.dev(), b.ino())
+            };
+            if !same {
+                return Ok(false);
+            }
+        }
+        Ok(io(fs::read_dir(target))?.count() == expected)
+    }
 
     pub(super) trait Commands {
         fn run(&mut self, program: &str, args: &[OsString]) -> Result<String, String>;
@@ -690,8 +786,9 @@ mod mac {
             return Err("OpenAI bundle has an invalid build identifier".into());
         }
         let resources = app.join(RESOURCES);
+        let (codex, codex_tree, codex_code) = codex_layout(&resources);
         for relative in [
-            "codex".to_owned(),
+            codex.to_owned(),
             "cua_node/bin/node".into(),
             "cua_node/bin/node_repl".into(),
             format!("{MODULES}/{ENTRY}"),
@@ -718,15 +815,15 @@ mod mac {
         }
         let seals = signed_seals(app)?;
         for relative in [
-            Path::new("Resources/codex"),
             Path::new("Resources/cua_node"),
             Path::new("Resources/plugins/openai-bundled/plugins/chrome"),
+            &Path::new("Resources").join(codex_tree),
         ] {
             verify_tree(&app.join("Contents"), relative, &seals)?;
         }
         for relative in [
-            "Contents/Resources/codex",
             "Contents/Resources/cua_node/bin/node",
+            &format!("{RESOURCES}/{codex_code}"),
             "Contents/Resources/cua_node/bin/node_repl",
             &format!("{RESOURCES}/{extension_host}"),
             &format!("{RESOURCES}/{MODULES}/{SKY}"),
@@ -815,7 +912,7 @@ mod mac {
             quote(&runtime.join("bin/node"))?,
             quote(&modules)?,
             quote(&modules)?,
-            quote(&resources.join("codex"))?,
+            quote(&codex_executable(version))?,
             quote(&modules.join(SKY))?,
             quote(&runtime.join("bin"))?,
             quote(&runtime.join("bin/node"))?,
@@ -855,6 +952,8 @@ mod mac {
         let result = validate().and_then(|version| {
             let app = version.join(APP);
             remove_legacy_browser_config(&app)?;
+            // Before fingerprinting: linking changes the files' link counts.
+            link_codex_cli(&version)?;
             let (build, fingerprint) = verified_cached(root, &app, commands, refresh)?;
             commands.check_cancelled()?;
             let host = ensure_host(root, &version, HOST_MODULES)?;
@@ -888,10 +987,11 @@ mod mac {
         hash: &str,
     ) -> Result<String, String> {
         Ok(format!(
-            "#!/bin/sh\nset -eu\nexport NANOCODEX_CUA_NATIVE_APP={}\nexport NANOCODEX_CUA_NATIVE_PROVIDER={}\nexport NANOCODEX_CUA_NATIVE_STATE={}\nexec {} {} \"$@\"\n",
+            "#!/bin/sh\nset -eu\nexport NANOCODEX_CUA_NATIVE_APP={}\nexport NANOCODEX_CUA_NATIVE_PROVIDER={}\nexport NANOCODEX_CUA_NATIVE_STATE={}\nexport NANOCODEX_CUA_NATIVE_CODEX={}\nexec {} {} \"$@\"\n",
             quote(&version.join(APP))?,
             quote(&host.join("upstream-cua-provider"))?,
             quote(&root.join("host-state").join(hash))?,
+            quote(&codex_executable(version))?,
             quote(&version.join(APP).join(RESOURCES).join("cua_node/bin/node"))?,
             quote(&host.join("openai-cua-native-host.mjs"))?,
         ))
@@ -1371,6 +1471,7 @@ mod mac {
             || name.starts_with(&format!("{prefix}Contents/MacOS/"))
             || name == format!("{prefix}Contents/_CodeSignature/CodeResources")
             || name == format!("{prefix}{RESOURCES}/codex")
+            || name.starts_with(&format!("{prefix}{RESOURCES}/codex-cli/"))
             || name.starts_with(&format!("{prefix}{RESOURCES}/cua_node/"))
             || name.starts_with(&format!(
                 "{prefix}{RESOURCES}/plugins/openai-bundled/plugins/chrome/"
@@ -1591,6 +1692,7 @@ mod mac {
         let relative = PathBuf::from("versions").join(format!("{build}-{}", nonce()));
         let version = root.join(&relative);
         io(fs::rename(stage.path.join("payload"), &version))?;
+        link_codex_cli(&version)?;
         // Finish the host before changing the selected bundle. Failed host
         // preparation must leave the previous selection and receipt intact.
         let host = ensure_host(root, &version, HOST_MODULES)?;
@@ -1620,6 +1722,7 @@ mod mac {
         let version = root.join(target);
         let resources = version.join(APP).join(RESOURCES);
         let runtime = resources.join("cua_node");
+        let codex = codex_executable(&version);
         // The official installer writes extension-host-config.json beside its
         // native host. Run it against our verified copy so setup never mutates
         // the signed sparse OpenAI bundle.
@@ -1629,7 +1732,7 @@ mod mac {
             &installer,
             &runtime.join("bin/node"),
             &runtime.join("bin/node_repl"),
-            &resources.join("codex"),
+            &codex,
         ] {
             if !path.is_file() {
                 return Err(format!(
@@ -1648,7 +1751,7 @@ await install({ appServerRuntimePaths: {
         let output = std::process::Command::new(runtime.join("bin/node"))
             .args(["--input-type=module", "--eval", source])
             .env("NANOCODEX_BROWSER_INSTALLER", &installer)
-            .env("NANOCODEX_BROWSER_CODEX", resources.join("codex"))
+            .env("NANOCODEX_BROWSER_CODEX", &codex)
             .env("NANOCODEX_BROWSER_NODE", runtime.join("bin/node"))
             .env("NANOCODEX_BROWSER_NODE_REPL", runtime.join("bin/node_repl"))
             .stdin(std::process::Stdio::null())

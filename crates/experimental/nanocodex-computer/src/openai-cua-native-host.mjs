@@ -44,7 +44,8 @@ export async function configuration(env = process.env, platform = process.platfo
   if (Buffer.byteLength(socket) > 103) throw fail('Native host Unix socket path is too long.');
   return { ...DEFAULTS, app, provider, state, socketRoot, version, key, socket, lock: path.join(socketRoot, `${key}.lock`),
     profile: path.join(state, `${key}.profile`), node: path.join(app, 'Contents/Resources/cua_node/bin/node'),
-    codex: path.join(app, 'Contents/Resources/codex'), env };
+    // Newer bundles run the CLI from a mirror outside the sparse bundle.
+    codex: env.NANOCODEX_CUA_NATIVE_CODEX ? absolute(env.NANOCODEX_CUA_NATIVE_CODEX, 'NANOCODEX_CUA_NATIVE_CODEX') : path.join(app, 'Contents/Resources/codex'), env };
 }
 
 // Reject symlink traversal and state directories belonging to another user.

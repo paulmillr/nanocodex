@@ -5420,6 +5420,7 @@ dependencies = [
  "nanousd",
  "nix 0.31.3",
  "percent-encoding",
+ "portable-pty",
  "pulldown-cmark",
  "rand 0.9.5",
  "ratatex",

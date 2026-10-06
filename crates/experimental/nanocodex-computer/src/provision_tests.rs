@@ -16,6 +16,8 @@ fn component_selection_excludes_the_desktop_shell() {
         "ChatGPT.app/Contents/MacOS/ChatGPT",
         "ChatGPT.app/Contents/_CodeSignature/CodeResources",
         "ChatGPT.app/Contents/Resources/codex",
+        "ChatGPT.app/Contents/Resources/codex-cli/bin/codex",
+        "ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex",
         "ChatGPT.app/Contents/Resources/cua_node/bin/node",
         "ChatGPT.app/Contents/Resources/plugins/openai-bundled/plugins/chrome/scripts/installManifest.mjs",
     ] { assert!(selected_name(name, prefix), "{name}"); }
@@ -49,7 +51,7 @@ fn parses_bounded_classic_zip_directory() {
 #[test]
 fn launcher_uses_only_headless_upstream_components() {
     let script = launcher(Path::new("/tmp/runtime")).unwrap();
-    assert!(script.contains("Contents/Resources/codex"));
+    assert!(script.contains("/tmp/runtime/codex-cli/bin/codex"));
     assert!(script.contains("cua_node/bin/node"));
     assert!(script.contains("BROWSER_USE_TINYSKY_ENABLED=1"));
     assert!(!script.contains("Contents/MacOS"));
